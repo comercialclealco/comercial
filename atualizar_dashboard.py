@@ -27,10 +27,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 PROJECT_DIR = r"C:\Users\raulribeiro\Documents\App Gestão Etanol"
 
 # Caminho do Excel — baixado automaticamente via navegador (Selenium)
-EXCEL_PATH = os.path.join(PROJECT_DIR, "Gestão Etanol-Dash.xlsx")
+EXCEL_PATH = os.path.join(PROJECT_DIR, "Gestão Etanol_Atual.xlsx")
 
 # Link do arquivo compartilhado (Marcello)
-SHARE_LINK = "https://clealco-my.sharepoint.com/personal/marcello_pandin_clealco_com_br/Documents/Gestão Etanol.xlsx"
+SHARE_LINK = "https://clealco-my.sharepoint.com/personal/raul_gomes_clealco_com_br/Documents/Compartilhados/App Gestão Etanol/Gestão Etanol_Atual.xlsx"
 
 # O Chrome já baixa direto na pasta do projeto (sem precisar mover de Downloads)
 DOWNLOADS_DIR = PROJECT_DIR
@@ -149,7 +149,16 @@ def download_via_chrome():
 
     try:
         driver.get(SHARE_LINK)
+        time.sleep(3)  # aguarda o navegador processar o redirecionamento
+
+        # Se não foi para o SharePoint, força a navegação novamente
+        if "sharepoint.com" not in driver.current_url and "microsoft" not in driver.current_url.lower():
+            print("  ⚠ Navegando novamente para o SharePoint...")
+            driver.get(SHARE_LINK)
+            time.sleep(3)
+
         print("✔ Página aberta.")
+        print(f"  URL atual: {driver.current_url[:80]}")
         print("\n  ➜ Faça login se for solicitado.")
         print("  ➜ Depois baixe o arquivo: Arquivo → Salvar uma Cópia → Baixar uma Cópia.")
         print("  ⏳ Aguardando o download terminar (até 3 minutos)...\n")
@@ -193,7 +202,7 @@ def find_excel():
         print(f"\n⚠ Não foi possível baixar automaticamente: {e}")
         # Fallback: procura arquivo já baixado manualmente antes
         pasta_projeto = PROJECT_DIR
-        nomes_possiveis = ["Gestão Etanol-Dash.xlsx", "Gestão Etanol.xlsx"]
+        nomes_possiveis = ["Gestão Etanol_Atual.xlsx", "Gestão Etanol-Dash.xlsx", "Gestão Etanol.xlsx"]
         possiveis = [EXCEL_PATH]
         for pasta in [pasta_projeto, DOWNLOADS_DIR]:
             for nome in nomes_possiveis:
@@ -204,7 +213,7 @@ def find_excel():
                 return path
         raise Exception(
             "Excel não encontrado nem foi possível baixar automaticamente.\n"
-            "Baixe manualmente e salve na pasta do projeto como 'Gestão Etanol-Dash.xlsx'."
+            "Baixe manualmente e salve na pasta do projeto como 'Gestão Etanol_Atual.xlsx'."
         )
 
 
@@ -247,14 +256,15 @@ def read_clm(wb):
     rows = []
     for row in ws.iter_rows(min_row=4, values_only=True):
         try:
-            trader, corretora, distribuidora, contrato, volume, pedido, preco = (
-                row[1], row[2], row[3], row[4], row[5], row[6], row[7]
+            safra, trader, corretora, distribuidora, contrato, volume, pedido, preco = (
+                row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7]
             )
         except IndexError:
             continue
         if not volume and not contrato:
             continue
         rows.append({
+            "safra":         str(safra or "").strip(),
             "trader":        str(trader or "").strip(),
             "corretora":     str(corretora or "").strip(),
             "distribuidora": str(distribuidora or "").strip(),
