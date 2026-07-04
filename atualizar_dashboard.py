@@ -27,10 +27,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 PROJECT_DIR = r"C:\Users\raulribeiro\Documents\App Gestão Etanol"
 
 # Caminho do Excel — baixado automaticamente via navegador (Selenium)
-EXCEL_PATH = os.path.join(PROJECT_DIR, "Gestão Etanol_Atual.xlsx")
+EXCEL_PATH = os.path.join(PROJECT_DIR, "Gestão Etanol.xlsx")
 
-# Link do arquivo compartilhado (Marcello)
-SHARE_LINK = "https://clealco-my.sharepoint.com/personal/raul_gomes_clealco_com_br/Documents/Compartilhados/App Gestão Etanol/Gestão Etanol_Atual.xlsx"
+# Link da pasta SharePoint — o script abre a pasta e baixa o arquivo Gestão Etanol.xlsx
+SHARE_LINK = "https://clealco-my.sharepoint.com/:f:/r/personal/raul_gomes_clealco_com_br/Documents/Compartilhados/App%20Gest%C3%A3o%20Etanol?csf=1&web=1&e=hDyZdl"
 
 # O Chrome já baixa direto na pasta do projeto (sem precisar mover de Downloads)
 DOWNLOADS_DIR = PROJECT_DIR
@@ -121,48 +121,96 @@ def minutos_avisar_threshold():
     return 15  # ajuste aqui se quiser um limite diferente
 
 
-def download_via_chrome():
-    """Abre o Chrome, navega até o link do SharePoint e aguarda você baixar
-    o arquivo manualmente (Arquivo → Salvar uma Cópia → Baixar uma Cópia).
-    Detecta automaticamente quando o download termina."""
+# Caminho do OneDrive sincronizado no PC
+ONEDRIVE_PATHS = [
+    r"C:\Users\raulribeiro\OneDrive - CLEALCO AÇÚCAR E ÁLCOOL S.A\Compartilhados\App Gestão Etanol\Gestão Etanol.xlsx",
+]
 
+
+def download_via_chrome():
+    """Tenta copiar o Excel direto do OneDrive sincronizado.
+    Se não encontrar, abre o Chrome no SharePoint e usa a API de download."""
+
+    # ── Tentativa 1: OneDrive sincronizado localmente ──────────────────────
+    for caminho in ONEDRIVE_PATHS:
+        if os.path.exists(caminho):
+            print(f"✔ Excel encontrado no OneDrive local:\n  {caminho}")
+            if os.path.abspath(caminho) != os.path.abspath(EXCEL_PATH):
+                shutil.copy2(caminho, EXCEL_PATH)
+                print(f"✔ Copiado para:\n  {EXCEL_PATH}")
+            else:
+                print("✔ Arquivo já está no caminho correto.")
+            return EXCEL_PATH
+
+    print("⚠ OneDrive local não encontrado. Tentando baixar via Chrome...")
+
+    # ── Tentativa 2: Download direto via Chrome + API do SharePoint ────────
     os.makedirs(CHROME_PROFILE_DIR, exist_ok=True)
 
-    # Limpa downloads antigos do mesmo nome para não confundir qual é o novo
-    for old in glob.glob(os.path.join(DOWNLOADS_DIR, "Gestão Etanol*.xlsx")):
+    for old_file in glob.glob(os.path.join(DOWNLOADS_DIR, "Gestão Etanol*.xlsx")):
         try:
-            os.remove(old)
+            os.remove(old_file)
         except OSError:
             pass
 
     options = Options()
     options.add_argument(f"--user-data-dir={CHROME_PROFILE_DIR}")
     options.add_argument("--profile-directory=Default")
-    prefs = {
+    options.add_experimental_option("prefs", {
         "download.default_directory": DOWNLOADS_DIR,
         "download.prompt_for_download": False,
-    }
-    options.add_experimental_option("prefs", prefs)
+    })
 
     print("🌐 Abrindo o Chrome...")
     driver = webdriver.Chrome(options=options)
 
     try:
+        # Abre a pasta do SharePoint
         driver.get(SHARE_LINK)
-        time.sleep(3)  # aguarda o navegador processar o redirecionamento
+        time.sleep(4)
 
-        # Se não foi para o SharePoint, força a navegação novamente
-        if "sharepoint.com" not in driver.current_url and "microsoft" not in driver.current_url.lower():
-            print("  ⚠ Navegando novamente para o SharePoint...")
-            driver.get(SHARE_LINK)
-            time.sleep(3)
+        print("✔ Página aberta — faça login se solicitado.")
 
-        print("✔ Página aberta.")
-        print(f"  URL atual: {driver.current_url[:80]}")
-        print("\n  ➜ Faça login se for solicitado.")
-        print("  ➜ Depois baixe o arquivo: Arquivo → Salvar uma Cópia → Baixar uma Cópia.")
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.common.action_chains import ActionChains
+
+        wait = WebDriverWait(driver, 120)
+
+        # Aguarda o arquivo aparecer (nome sem underscore)
+        print("  ⏳ Aguardando a pasta carregar...")
+        arquivo = wait.until(EC.visibility_of_element_located(
+            (By.XPATH, "//span[normalize-space(text())='Gestão Etanol'] | //a[normalize-space(text())='Gestão Etanol']")
+        ))
+        print("  ✔ Arquivo localizado.")
+        time.sleep(1)
+
+        # Seleciona o arquivo clicando no checkbox (coluna da esquerda)
+        try:
+            checkbox = driver.find_element(
+                By.XPATH,
+                "//div[contains(@class,'ms-List-cell') and .//span[normalize-space(text())='Gestão Etanol']]//div[contains(@role,'checkbox') or contains(@class,'checkBox')]"
+            )
+            checkbox.click()
+            time.sleep(1)
+            print("  ✔ Arquivo selecionado via checkbox.")
+        except Exception:
+            pass
+
+        # Clica com botão direito sobre o nome do arquivo
+        ActionChains(driver).context_click(arquivo).perform()
+        time.sleep(2)
+        print("  ✔ Menu de contexto aberto.")
+
+        # Clica em Baixar
+        btn = wait.until(EC.element_to_be_clickable(
+            (By.XPATH, "//*[@role='menuitem' and (contains(.,'Baixar') or contains(.,'Download'))]"
+                       " | //span[contains(text(),'Baixar') or contains(text(),'Download')]")
+        ))
+        btn.click()
+        print("  ✔ Download iniciado.")
+
         print("  ⏳ Aguardando o download terminar (até 3 minutos)...\n")
-
         downloaded = _wait_for_download(timeout=180)
         if not downloaded:
             raise Exception("Tempo esgotado esperando o download do Excel.")
@@ -171,7 +219,7 @@ def download_via_chrome():
             if os.path.exists(EXCEL_PATH):
                 os.remove(EXCEL_PATH)
             shutil.move(downloaded, EXCEL_PATH)
-        print(f"✔ Excel baixado e salvo em:\n  {EXCEL_PATH}")
+        print(f"✔ Excel salvo em:\n  {EXCEL_PATH}")
 
     finally:
         driver.quit()
